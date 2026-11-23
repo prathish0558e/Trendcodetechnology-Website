@@ -53,6 +53,14 @@ export default function Footer() {
               <span>{COMPANY.address}</span>
             </li>
             <li>
+              <i className="bi bi-clock"></i>
+              <span>
+                Office Timing: 10:00 AM – 6:00 PM
+                <br />
+                <small style={{ color: "#ef4444", fontWeight: 600 }}>Sunday Holiday</small>
+              </span>
+            </li>
+            <li>
               <i className="bi bi-envelope-open"></i>
               <span>{COMPANY.email}</span>
             </li>
@@ -88,11 +96,10 @@ export default function Footer() {
       <div className="footer-bottom">
         <div className="container inner">
           <span>
-            © {new Date().getFullYear()}{" "}
-            <Link to="/">{siteHost}</Link>. All Rights Reserved.
+            Copyright © 2026 <Link to="/">tctechs.in</Link>. All Rights Reserved.
           </span>
           <span>
-            Designed &amp; Engineered by Trend Code Technology
+            Designed &amp; Engineered by @Trend Code Technology
           </span>
         </div>
       </div>

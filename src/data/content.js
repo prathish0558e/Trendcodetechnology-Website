@@ -10,6 +10,7 @@ export const COMPANY = {
   email: "trendcodetechnology2026@gmail.com",
   address: "No. 215, 2nd Floor, Shakthi Nagar, Near ICICI Bank, Ganapathy, Coimbatore — 641006",
   addressShort: "Ganapathy, Coimbatore",
+  hours: "10:00 AM – 6:00 PM (Sunday Holiday)",
   founded: 2019,
   socials: [
     { label: "Instagram", icon: "bi-instagram", url: "https://www.instagram.com/trendcodetechnology/" },

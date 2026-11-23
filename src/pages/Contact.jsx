@@ -53,6 +53,14 @@ export default function Contact() {
                   </div>
                 </div>
 
+                <div className="contact-item">
+                  <div className="ic"><i className="bi bi-clock"></i></div>
+                  <div>
+                    <h4>Office Timing</h4>
+                    <p>{COMPANY.hours}</p>
+                  </div>
+                </div>
+
                 {role && (
                   <div className="banner ok" style={{ marginTop: 16, marginBottom: 0 }}>
                     <i className="bi bi-briefcase me-1"></i>
