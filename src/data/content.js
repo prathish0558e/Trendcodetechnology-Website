@@ -12,7 +12,7 @@ export const COMPANY = {
   addressShort: "Ganapathy, Coimbatore",
   founded: 2019,
   socials: [
-    { label: "Instagram", icon: "bi-instagram", url: "https://www.instagram.com/trendcodetechnology2026/" },
+    { label: "Instagram", icon: "bi-instagram", url: "https://www.instagram.com/trendcodetechnology/" },
     { label: "X (Twitter)", icon: "bi-twitter-x", url: "https://x.com/trendcodetech" },
     { label: "YouTube", icon: "bi-youtube", url: "https://www.youtube.com/@trendcodetechnology" },
     { label: "Facebook", icon: "bi-facebook", url: "https://www.facebook.com/profile.php?id=61593813545533" },

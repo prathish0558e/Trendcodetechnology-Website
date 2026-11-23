@@ -4,7 +4,7 @@ import ceoPhoto from "../../ceo.png";
 
 export const TEAM = [
   {
-    name: "Bharath T",
+    name: "Mr. Bharath T",
     role: "Chief Executive Officer (CEO)",
     photo: ceoPhoto,
     initials: "BT",

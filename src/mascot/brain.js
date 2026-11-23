@@ -12,7 +12,7 @@ import { SITES } from "../data/sites.js";
  * into the assistant bundle for two strings is not worth it. Keep in sync.
  */
 const LEADERSHIP = [
-  { name: "Bharath T", role: "Chief Executive Officer (CEO)", short: "our CEO" },
+  { name: "Mr. Bharath T", role: "Chief Executive Officer (CEO)", short: "our CEO" },
   { name: "Ms. Mohana Priya D", role: "Managing Director (MD)", short: "our MD" },
 ];
 
