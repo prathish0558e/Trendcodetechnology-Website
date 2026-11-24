@@ -94,6 +94,43 @@ export const SITES = [
     ],
     note: "The full platform launches at its own web address — until then, our trade desk handles requirements over phone and email.",
   },
+  {
+    key: "overseas",
+    name: "TCT Overseas & Education",
+    tagline: "Study Abroad & Global Careers",
+    mark: "globe",
+    accent: "#0ea5e9",
+    accent2: "#6366f1",
+    path: "/tct-overseas-edu",
+    url: null,
+    status: "Admissions open & portal launching soon",
+    eyebrow: "TCT Group · Global Education & Careers",
+    headline: "Your Gateway to Global Education, University Admissions & Visas",
+    body: "TCT Overseas & Education guides students and ambitious professionals across Tamil Nadu to prestigious universities in the UK, USA, Canada, Australia, Germany, Ireland and more. From course selection and university shortlisting to IELTS/TOEFL coaching, financial documentation, and visa processing — our experienced counselors walk with you every step of the journey.",
+    highlights: [
+      {
+        icon: "bi-globe2",
+        title: "Top Global Universities",
+        text: "Admissions guidance and direct application support for accredited universities across UK, USA, Canada, Australia & Europe.",
+      },
+      {
+        icon: "bi-journal-check",
+        title: "Test Prep & Coaching",
+        text: "Targeted coaching for IELTS, TOEFL, PTE, and Duolingo with verified study materials and intensive mock tests.",
+      },
+      {
+        icon: "bi-passport",
+        title: "Visa & Financial Assistance",
+        text: "Transparent guidance on SOP drafting, education loans, scholarships, and embassy visa interviews.",
+      },
+      {
+        icon: "bi-briefcase",
+        title: "Post-Study Career Support",
+        text: "Post-study work permit guidance, internship placement assistance, and global career pathway planning.",
+      },
+    ],
+    note: "The dedicated student portal launches soon at its own web address — until then, admissions counseling and visa queries are handled directly by the TCT Overseas desk in Coimbatore.",
+  },
 ];
 
 export const SITE_KEYS = SITES.map((site) => site.key);

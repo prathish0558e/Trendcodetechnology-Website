@@ -63,7 +63,7 @@ export default function SiteShowcase({ variant = "hero" }) {
       ) : (
         <h2 className="ss-label">Explore the TCT Group of Businesses</h2>
       )}
-      <div className="ss-grid">
+      <div className="ss-grid ss-grid-4">
         {SITES.map((site) => (
           <SiteCard key={site.key} site={site} />
         ))}

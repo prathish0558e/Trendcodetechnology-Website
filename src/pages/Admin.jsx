@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { PageHero } from "../components/Reveal.jsx";
 import {
@@ -14,6 +14,12 @@ import {
   getTourEnquiries,
   postLogout,
   postRevokeSession,
+  getGallery,
+  postGalleryPhoto,
+  deleteGalleryPhoto,
+  getOffers,
+  postSendOffer,
+  deleteOffer,
 } from "../api.js";
 
 function fmtDate(iso) {
@@ -98,7 +104,7 @@ function ApplicationsTable({ rows }) {
   );
 }
 
-function InternshipsTable({ rows }) {
+function InternshipsTable({ rows, onPrepareOffer }) {
   if (!rows.length) {
     return (
       <div className="admin-empty">
@@ -118,6 +124,7 @@ function InternshipsTable({ rows }) {
             <th>Domain</th>
             <th>Duration</th>
             <th>Resume</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -147,6 +154,17 @@ function InternshipsTable({ rows }) {
                 ) : (
                   "—"
                 )}
+              </td>
+              <td>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ whiteSpace: "nowrap", padding: "5px 10px", fontSize: "12px" }}
+                  onClick={() => onPrepareOffer && onPrepareOffer(a)}
+                  title="Prepare & Send Official Offer Letter"
+                >
+                  <i className="bi bi-send-check me-1"></i> Send Offer
+                </button>
               </td>
             </tr>
           ))}
@@ -375,6 +393,1083 @@ function LeadsTable({ rows }) {
   );
 }
 
+function AdminGalleryManager({ photos, onAddPhoto, onDeletePhoto, deletingId }) {
+  const [mode, setMode] = useState("file"); // "file" | "url"
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("Office");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+
+  // Search & Filter in Admin
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("All");
+
+  const fileInputRef = useRef(null);
+
+  const processFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setErr("Please select a valid image file (JPEG, PNG, WebP, GIF, SVG).");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setErr("Image file size exceeds 10 MB limit.");
+      return;
+    }
+    setSelectedFile(file);
+    setPreview(URL.createObjectURL(file));
+    setErr(null);
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    processFile(file);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedFile(null);
+    setPreview(null);
+    setImageUrl("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setMsg(null);
+    setErr(null);
+
+    if (!title.trim()) {
+      setErr("Photo title is required.");
+      return;
+    }
+
+    if (mode === "file" && !selectedFile) {
+      setErr("Please select or drop an image file to upload.");
+      return;
+    }
+
+    if (mode === "url" && !imageUrl.trim()) {
+      setErr("Please enter a valid image URL.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      let payload;
+      if (mode === "file" && selectedFile) {
+        payload = new FormData();
+        payload.append("title", title.trim());
+        payload.append("category", category);
+        payload.append("date", date);
+        payload.append("description", description.trim());
+        payload.append("image", selectedFile);
+      } else {
+        payload = {
+          title: title.trim(),
+          category,
+          date,
+          description: description.trim(),
+          imageUrl: imageUrl.trim(),
+        };
+      }
+
+      await onAddPhoto(payload);
+      setMsg("Photo successfully published to live gallery!");
+      setTitle("");
+      setDescription("");
+      clearSelection();
+    } catch (error) {
+      setErr(error.message || "Failed to post photo.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Filtered photos in admin
+  const filteredPhotos = (photos || []).filter((p) => {
+    const matchesCat = filterCat === "All" || (p.category || "").toLowerCase() === filterCat.toLowerCase();
+    const matchesSearch = !search.trim() || (p.title || "").toLowerCase().includes(search.toLowerCase()) || (p.category || "").toLowerCase().includes(search.toLowerCase());
+    return matchesCat && matchesSearch;
+  });
+
+  return (
+    <div className="admin-gallery-wrap">
+      {/* Upload Form Card */}
+      <div className="admin-gallery-form-card">
+        <div className="admin-gallery-header-row">
+          <div>
+            <h3>
+              <i className="bi bi-cloud-arrow-up-fill text-primary"></i> Post New Photo to Gallery
+            </h3>
+            <p>
+              Upload high-resolution corporate photos, workspace memories, team milestones, and event highlights to the website.
+            </p>
+          </div>
+          <Link to="/gallery" target="_blank" className="btn btn-outline btn-sm">
+            <i className="bi bi-box-arrow-up-right me-1"></i> View Live Gallery
+          </Link>
+        </div>
+
+        {msg && (
+          <div className="banner ok" style={{ marginBottom: 20 }}>
+            <i className="bi bi-check-circle-fill me-2"></i> {msg}
+          </div>
+        )}
+        {err && (
+          <div className="banner err" style={{ marginBottom: 20 }}>
+            <i className="bi bi-exclamation-triangle-fill me-2"></i> {err}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="admin-gallery-grid-2">
+            {/* Left Column: Metadata */}
+            <div>
+              <div className="admin-field-group">
+                <label className="admin-label">
+                  <i className="bi bi-fonts text-primary"></i> Photo Title *
+                </label>
+                <div className="admin-input-wrap">
+                  <i className="bi bi-card-text"></i>
+                  <input
+                    type="text"
+                    className="admin-input"
+                    placeholder="e.g. Annual Tech Symposium 2026"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div className="admin-field-group">
+                  <label className="admin-label">
+                    <i className="bi bi-tags-fill text-primary"></i> Category
+                  </label>
+                  <div className="admin-input-wrap">
+                    <i className="bi bi-folder2-open"></i>
+                    <select
+                      className="admin-select"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                    >
+                      <option value="Office">Office</option>
+                      <option value="Team">Team</option>
+                      <option value="Events">Events</option>
+                      <option value="Workspace">Workspace</option>
+                      <option value="Celebrations">Celebrations</option>
+                      <option value="Achievements">Achievements</option>
+                      <option value="Training">Training</option>
+                      <option value="Projects">Projects</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="admin-field-group">
+                  <label className="admin-label">
+                    <i className="bi bi-calendar3 text-primary"></i> Event Date
+                  </label>
+                  <div className="admin-input-wrap">
+                    <i className="bi bi-calendar-event"></i>
+                    <input
+                      type="date"
+                      className="admin-input"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-field-group">
+                <label className="admin-label">
+                  <i className="bi bi-chat-square-quote text-primary"></i> Caption / Description (Optional)
+                </label>
+                <div className="admin-input-wrap">
+                  <i className="bi bi-chat-left-text"></i>
+                  <input
+                    type="text"
+                    className="admin-input"
+                    placeholder="Brief summary or context about this photo..."
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-field-group">
+                <label className="admin-label">
+                  <i className="bi bi-sliders text-primary"></i> Image Source
+                </label>
+                <div className="admin-mode-pills">
+                  <button
+                    type="button"
+                    className={`admin-mode-pill ${mode === "file" ? "active" : ""}`}
+                    onClick={() => {
+                      setMode("file");
+                      clearSelection();
+                    }}
+                  >
+                    <i className="bi bi-upload"></i> Upload Image File
+                  </button>
+                  <button
+                    type="button"
+                    className={`admin-mode-pill ${mode === "url" ? "active" : ""}`}
+                    onClick={() => {
+                      setMode("url");
+                      clearSelection();
+                    }}
+                  >
+                    <i className="bi bi-link-45deg"></i> Use Web Image URL
+                  </button>
+                </div>
+
+                {mode === "url" && (
+                  <div className="admin-input-wrap">
+                    <i className="bi bi-globe2"></i>
+                    <input
+                      type="url"
+                      className="admin-input"
+                      placeholder="https://example.com/photo.jpg"
+                      value={imageUrl}
+                      onChange={(e) => {
+                        setImageUrl(e.target.value);
+                        setPreview(e.target.value);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Visual Dropzone / Live Preview */}
+            <div>
+              <label className="admin-label">
+                <i className="bi bi-image text-primary"></i> Photo Preview &amp; Upload
+              </label>
+
+              {preview ? (
+                <div className="admin-preview-card">
+                  <div className="admin-preview-img-wrap">
+                    <img src={preview} alt="Upload preview" className="admin-preview-img" />
+                    <span className="admin-preview-badge">{category}</span>
+                  </div>
+                  <div className="admin-preview-bar">
+                    <span className="admin-preview-filename">
+                      {selectedFile ? selectedFile.name : (imageUrl || "Web Image")}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm text-danger"
+                      onClick={clearSelection}
+                      style={{ fontSize: "0.8rem", padding: "4px 10px" }}
+                    >
+                      <i className="bi bi-x-circle me-1"></i> Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className={`admin-dropzone ${isDragging ? "dragover" : ""}`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    style={{ display: "none" }}
+                  />
+                  <div className="admin-dropzone-icon">
+                    <i className="bi bi-cloud-arrow-up"></i>
+                  </div>
+                  <h4>Drag &amp; drop photo here</h4>
+                  <p>or click anywhere to browse from your computer</p>
+                  <div className="admin-dropzone-tags">
+                    <span className="admin-dropzone-tag">JPG</span>
+                    <span className="admin-dropzone-tag">PNG</span>
+                    <span className="admin-dropzone-tag">WEBP</span>
+                    <span className="admin-dropzone-tag">GIF</span>
+                    <span className="admin-dropzone-tag">Up to 10MB</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid #f1f5f9", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="submit"
+              className="admin-publish-btn"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <>
+                  <span className="spinner-border spinner-border-sm"></span> Publishing to Gallery...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-cloud-check-fill"></i> Post Photo to Gallery
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Existing Photos List & Management */}
+      <div>
+        <div className="admin-gallery-toolbar">
+          <div>
+            <h3 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+              <i className="bi bi-images me-2 text-primary"></i> Current Gallery Photos ({photos ? photos.length : 0})
+            </h3>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            {/* Search Box */}
+            <div className="admin-search-wrap">
+              <i className="bi bi-search"></i>
+              <input
+                type="text"
+                className="admin-search-input"
+                placeholder="Search photos by title..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {/* Category Filter */}
+            <select
+              className="admin-select"
+              value={filterCat}
+              onChange={(e) => setFilterCat(e.target.value)}
+              style={{ width: "auto", padding: "8px 14px", height: "auto" }}
+            >
+              <option value="All">All Categories</option>
+              <option value="Office">Office</option>
+              <option value="Team">Team</option>
+              <option value="Events">Events</option>
+              <option value="Workspace">Workspace</option>
+              <option value="Celebrations">Celebrations</option>
+              <option value="Achievements">Achievements</option>
+              <option value="Training">Training</option>
+              <option value="Projects">Projects</option>
+            </select>
+          </div>
+        </div>
+
+        {!filteredPhotos || filteredPhotos.length === 0 ? (
+          <div className="admin-empty">
+            <i className="bi bi-images"></i> No photos found. Post a new photo using the form above!
+          </div>
+        ) : (
+          <div className="admin-photo-grid">
+            {filteredPhotos.map((item) => (
+              <div key={item.id} className="admin-photo-card">
+                <div className="admin-photo-img-wrap">
+                  <img src={item.imageUrl} alt={item.title} className="admin-photo-img" />
+                  <span className="gallery-badge">{item.category}</span>
+                </div>
+                <div className="admin-photo-body">
+                  <h4 className="admin-photo-title">{item.title}</h4>
+                  {item.description && <p className="admin-photo-desc">{item.description}</p>}
+                  <div className="admin-photo-footer">
+                    <span className="admin-photo-date">
+                      <i className="bi bi-calendar3 me-1"></i> {item.date || "—"}
+                    </span>
+                    <button
+                      className="admin-del-btn"
+                      onClick={() => onDeletePhoto(item.id)}
+                      disabled={deletingId === item.id}
+                      title="Delete photo"
+                    >
+                      {deletingId === item.id ? (
+                        <span className="spinner-border spinner-border-sm"></span>
+                      ) : (
+                        <>
+                          <i className="bi bi-trash3"></i> Delete
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ADMIN: OFFER LETTER SENDER & HISTORY
+// ============================================================
+const ROLE_PRESETS = [
+  "Full Stack Web Developer Intern",
+  "Frontend React Developer Intern",
+  "Python & AI Intern",
+  "Node.js Backend Developer Intern",
+  "UI/UX Designer Intern",
+  "Mobile App Developer Intern",
+  "Data Science & Analytics Intern",
+  "Software Engineering Intern",
+];
+
+const FIELD_PRESETS = [
+  "Web Development & Coding",
+  "Full Stack Web Development",
+  "Frontend Architecture & UI",
+  "Python & Machine Learning",
+  "Backend & API Engineering",
+  "Mobile App Development",
+  "UI/UX & Product Design",
+  "Software Quality & Testing",
+];
+
+function formatOfferDisplayDate(dStr) {
+  if (!dStr) return "—";
+  try {
+    const d = new Date(dStr);
+    if (isNaN(d.getTime())) return dStr;
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return dStr;
+  }
+}
+
+function AdminOfferSender({
+  offers = [],
+  onSendOffer,
+  onDeleteOffer,
+  deletingId,
+  prefill,
+  onClearPrefill,
+}) {
+  const getToday = () => new Date().toISOString().slice(0, 10);
+  const getThreeMonthsLater = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 3);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const [salutation, setSalutation] = useState("Mr./Ms.");
+  const [candidateName, setCandidateName] = useState("");
+  const [candidateEmail, setCandidateEmail] = useState("");
+  const [role, setRole] = useState("Full Stack Web Developer Intern");
+  const [field, setField] = useState("Web Development & Coding");
+  const [startDate, setStartDate] = useState(getToday);
+  const [endDate, setEndDate] = useState(getThreeMonthsLater);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [search, setSearch] = useState("");
+  const [viewModalOffer, setViewModalOffer] = useState(null);
+
+  useEffect(() => {
+    if (prefill) {
+      if (prefill.candidateName) setCandidateName(prefill.candidateName);
+      if (prefill.candidateEmail) setCandidateEmail(prefill.candidateEmail);
+      if (prefill.role) setRole(prefill.role);
+      if (prefill.field) setField(prefill.field);
+      setSuccessMsg("Candidate details pre-filled from internship application!");
+      const timer = setTimeout(() => setSuccessMsg(""), 4500);
+      onClearPrefill?.();
+      return () => clearTimeout(timer);
+    }
+  }, [prefill, onClearPrefill]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSuccessMsg("");
+    setErrorMsg("");
+
+    if (!candidateName.trim()) {
+      setErrorMsg("Candidate name is required.");
+      return;
+    }
+    if (!candidateEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) {
+      setErrorMsg("Please enter a valid candidate email address.");
+      return;
+    }
+    if (!role.trim()) {
+      setErrorMsg("Internship role is required.");
+      return;
+    }
+    if (!startDate || !endDate) {
+      setErrorMsg("Both start date and end date are required.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await onSendOffer({
+        candidateName: candidateName.trim(),
+        candidateEmail: candidateEmail.trim(),
+        salutation,
+        role: role.trim(),
+        field: (field || role).trim(),
+        startDate,
+        endDate,
+      });
+
+      setSuccessMsg(res?.message || `Offer letter successfully emailed to ${candidateEmail}!`);
+      setCandidateName("");
+      setCandidateEmail("");
+    } catch (err) {
+      setErrorMsg(err.message || "Failed to send offer letter. Please verify SMTP settings.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUseAsTemplate = (item) => {
+    if (item.salutation) setSalutation(item.salutation);
+    if (item.candidateName) setCandidateName(item.candidateName);
+    if (item.candidateEmail) setCandidateEmail(item.candidateEmail);
+    if (item.role) setRole(item.role);
+    if (item.field) setField(item.field);
+    window.scrollTo({ top: 200, behavior: "smooth" });
+  };
+
+  const filteredOffers = (offers || []).filter((o) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      (o.candidateName && o.candidateName.toLowerCase().includes(q)) ||
+      (o.candidateEmail && o.candidateEmail.toLowerCase().includes(q)) ||
+      (o.role && o.role.toLowerCase().includes(q)) ||
+      (o.refId && o.refId.toLowerCase().includes(q))
+    );
+  });
+
+  const displayStart = formatOfferDisplayDate(startDate) || "[Start Date]";
+  const displayEnd = formatOfferDisplayDate(endDate) || "[End Date]";
+  const displayName = candidateName.trim() || "[Candidate Name]";
+  const displayRole = role.trim() || "[Role]";
+  const displayField = (field.trim() || displayRole);
+
+  return (
+    <div className="admin-offer-wrap">
+      {/* Top Banner / Info */}
+      <div className="admin-offer-card">
+        <div className="admin-gallery-header-row">
+          <div>
+            <h3>
+              <i className="bi bi-file-earmark-check text-primary"></i> Internship Offer & Confirmation Sender
+            </h3>
+            <p>
+              Send professional, branded offer letters to shortlisted candidates with one click. Emails are dispatched instantly with company styling and delivery history is archived below.
+            </p>
+          </div>
+          <span className="badge bg-primary-subtle text-primary fw-semibold px-3 py-2 rounded-pill">
+            <i className="bi bi-award me-1"></i> Official Automated Dispatch
+          </span>
+        </div>
+
+        {successMsg && (
+          <div className="banner ok" style={{ marginBottom: 20 }}>
+            <i className="bi bi-check-circle-fill me-2"></i> {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="banner warn" style={{ marginBottom: 20 }}>
+            <i className="bi bi-exclamation-triangle-fill me-2"></i> {errorMsg}
+          </div>
+        )}
+
+        <div className="admin-offer-grid">
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 12 }}>
+              <div>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                  Salutation
+                </label>
+                <select
+                  className="form-control"
+                  value={salutation}
+                  onChange={(e) => setSalutation(e.target.value)}
+                >
+                  <option value="Mr./Ms.">Mr./Ms.</option>
+                  <option value="Mr.">Mr.</option>
+                  <option value="Ms.">Ms.</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                  Candidate Full Name <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. John Doe"
+                  value={candidateName}
+                  onChange={(e) => setCandidateName(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                Candidate Email Address <span className="text-danger">*</span>
+              </label>
+              <input
+                type="email"
+                className="form-control"
+                placeholder="candidate@gmail.com"
+                value={candidateEmail}
+                onChange={(e) => setCandidateEmail(e.target.value)}
+                required
+              />
+              <small className="text-muted" style={{ fontSize: "11.5px" }}>
+                The official offer letter email will be dispatched to this address.
+              </small>
+            </div>
+
+            <div>
+              <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                Internship Role / Designation <span className="text-danger">*</span>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Full Stack Web Developer Intern"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                required
+              />
+              <div className="admin-preset-pills">
+                {ROLE_PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`admin-preset-pill ${role === p ? "active" : ""}`}
+                    onClick={() => {
+                      setRole(p);
+                      if (!field || field === "Web Development & Coding") {
+                        const matched = FIELD_PRESETS.find((f) =>
+                          p.toLowerCase().includes("python")
+                            ? f.includes("Python")
+                            : p.toLowerCase().includes("react")
+                            ? f.includes("Frontend")
+                            : p.toLowerCase().includes("ui")
+                            ? f.includes("UI/UX")
+                            : false
+                        );
+                        if (matched) setField(matched);
+                      }
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                Field / Domain Contribution <span className="text-danger">*</span>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Web Development & Coding"
+                value={field}
+                onChange={(e) => setField(e.target.value)}
+                required
+              />
+              <div className="admin-preset-pills">
+                {FIELD_PRESETS.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={`admin-preset-pill ${field === f ? "active" : ""}`}
+                    onClick={() => setField(f)}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                  Internship Start Date <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: "13px" }}>
+                  Internship End Date <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={submitting}
+                style={{ flex: 1, padding: "12px 20px" }}
+              >
+                {submitting ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                    Sending Offer Letter...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-send-fill me-2"></i> Send Offer Letter
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setCandidateName("");
+                  setCandidateEmail("");
+                  setErrorMsg("");
+                  setSuccessMsg("");
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </form>
+
+          {/* Live Preview Paper */}
+          <div className="admin-offer-preview-box">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong style={{ fontSize: "13px", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <i className="bi bi-eye me-1 text-primary"></i> Live Email Preview
+              </strong>
+              <span className="badge bg-secondary-subtle text-secondary" style={{ fontSize: "11px" }}>
+                Auto-updated
+              </span>
+            </div>
+
+            <div className="admin-offer-letter-paper">
+              <div className="admin-offer-paper-header">
+                <h4>TREND CODE TECHNOLOGY</h4>
+                <p>Official Internship Offer & Confirmation</p>
+              </div>
+
+              <div className="admin-offer-meta-row">
+                <span>Ref: <strong style={{ color: "#0f172a" }}>TCT/INT/2026/PROV</strong></span>
+                <span>Date: <strong style={{ color: "#0f172a" }}>{new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</strong></span>
+              </div>
+
+              <div className="admin-offer-letter-body">
+                <p>
+                  <strong>Dear {salutation} {displayName},</strong>
+                </p>
+
+                <p>
+                  We are pleased to confirm your position as a &ldquo;<strong>{displayRole}</strong>&rdquo; at &ldquo;<strong>TREND CODE TECHNOLOGY</strong>&rdquo;. Your internship began on <strong>{displayStart}</strong> to <strong>{displayEnd}</strong> and is currently ongoing.
+                </p>
+
+                <p>
+                  During this internship, you are expected to contribute to <strong>{displayField}</strong> tasks, assist in coding and debugging activities, and support project requirements as assigned. This internship is designed to enhance your technical skills and provide valuable hands-on industry experience.
+                </p>
+
+                <p>
+                  We appreciate your contribution so far and look forward to your continued dedication and learning.
+                </p>
+
+                <div className="admin-offer-paper-summary">
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Position</span><br />
+                    <strong>{displayRole}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Domain / Field</span><br />
+                    <strong>{displayField}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Duration</span><br />
+                    <strong>{displayStart} &mdash; {displayEnd}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Status</span><br />
+                    <span className="text-success fw-bold">Active · Ongoing</span>
+                  </div>
+                </div>
+
+                <div className="admin-offer-paper-sign">
+                  <div>Warm regards,</div>
+                  <strong>HR & Talent Operations</strong><br />
+                  <span style={{ color: "#0d6efd", fontWeight: 600 }}>Trend Code Technology</span><br />
+                  <span>Ganapathy, Coimbatore — 641006 · +91 93848 47922</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sent History Table */}
+      <div className="admin-offer-card">
+        <div className="admin-gallery-toolbar" style={{ marginBottom: 16 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "#0f172a" }}>
+              <i className="bi bi-clock-history text-primary me-2"></i> Sent Offer Letters History
+            </h3>
+            <span style={{ fontSize: "13px", color: "#64748b" }}>
+              Archived records of all letters delivered to candidates ({offers.length} total)
+            </span>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ position: "relative" }}>
+              <i className="bi bi-search" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }}></i>
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder="Search candidate or role..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ paddingLeft: 34, width: 240 }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {!filteredOffers.length ? (
+          <div className="admin-empty">
+            <i className="bi bi-envelope-paper"></i> No offer letters recorded yet. Send your first letter above!
+          </div>
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Sent Date</th>
+                  <th>Candidate</th>
+                  <th>Email</th>
+                  <th>Role & Domain</th>
+                  <th>Internship Period</th>
+                  <th>Ref ID</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOffers.map((o) => (
+                  <tr key={o.id}>
+                    <td className="admin-date">{fmtDate(o.createdAt)}</td>
+                    <td>
+                      <strong>{o.salutation || ""} {o.candidateName}</strong>
+                    </td>
+                    <td>
+                      <a href={`mailto:${o.candidateEmail}`}>{o.candidateEmail}</a>
+                    </td>
+                    <td>
+                      <strong>{o.role}</strong>
+                      {o.field && <p className="admin-note" style={{ margin: "2px 0 0" }}>{o.field}</p>}
+                    </td>
+                    <td>
+                      <span className="admin-note">
+                        {o.startDate} &mdash; {o.endDate}
+                      </span>
+                    </td>
+                    <td>
+                      <code style={{ fontSize: "12px", background: "#f1f5f9", padding: "2px 6px", borderRadius: 4 }}>
+                        {o.refId || "—"}
+                      </code>
+                    </td>
+                    <td>
+                      <span className="badge bg-success-subtle text-success fw-bold px-2 py-1 rounded-pill">
+                        <i className="bi bi-check2-circle me-1"></i> {o.status || "Sent"}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                          onClick={() => setViewModalOffer(o)}
+                          title="View Full Offer Letter"
+                        >
+                          <i className="bi bi-eye"></i> View
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                          onClick={() => handleUseAsTemplate(o)}
+                          title="Load Details into Form"
+                        >
+                          <i className="bi bi-pencil-square"></i> Use
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm text-danger"
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                          disabled={deletingId === o.id}
+                          onClick={() => onDeleteOffer(o.id)}
+                          title="Delete Record"
+                        >
+                          <i className="bi bi-trash3"></i>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Modal: View Offer Letter */}
+      {viewModalOffer && (
+        <div className="admin-modal-overlay" onClick={() => setViewModalOffer(null)}>
+          <div className="admin-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header">
+              <h4 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700 }}>
+                <i className="bi bi-file-earmark-check text-primary me-2"></i>
+                Offer Letter &mdash; {viewModalOffer.candidateName}
+              </h4>
+              <button
+                type="button"
+                className="btn-close"
+                onClick={() => setViewModalOffer(null)}
+                aria-label="Close"
+              ></button>
+            </div>
+            <div className="admin-modal-body">
+              <div className="admin-offer-letter-paper" style={{ border: "1px solid #cbd5e1" }}>
+                <div className="admin-offer-paper-header">
+                  <h4>TREND CODE TECHNOLOGY</h4>
+                  <p>Official Internship Offer & Confirmation</p>
+                </div>
+
+                <div className="admin-offer-meta-row">
+                  <span>Ref: <strong style={{ color: "#0f172a" }}>{viewModalOffer.refId || "TCT/INT/2026"}</strong></span>
+                  <span>Sent On: <strong style={{ color: "#0f172a" }}>{fmtDate(viewModalOffer.createdAt)}</strong></span>
+                </div>
+
+                <div className="admin-offer-letter-body">
+                  <p>
+                    <strong>Dear {viewModalOffer.salutation || "Mr./Ms."} {viewModalOffer.candidateName},</strong>
+                  </p>
+
+                  <p>
+                    We are pleased to confirm your position as a &ldquo;<strong>{viewModalOffer.role}</strong>&rdquo; at &ldquo;<strong>TREND CODE TECHNOLOGY</strong>&rdquo;. Your internship began on <strong>{viewModalOffer.startDate}</strong> to <strong>{viewModalOffer.endDate}</strong> and is currently ongoing.
+                  </p>
+
+                  <p>
+                    During this internship, you are expected to contribute to <strong>{viewModalOffer.field}</strong> tasks, assist in coding and debugging activities, and support project requirements as assigned. This internship is designed to enhance your technical skills and provide valuable hands-on industry experience.
+                  </p>
+
+                  <p>
+                    We appreciate your contribution so far and look forward to your continued dedication and learning.
+                  </p>
+
+                  <div className="admin-offer-paper-summary">
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Position</span><br />
+                      <strong>{viewModalOffer.role}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Domain</span><br />
+                      <strong>{viewModalOffer.field}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Period</span><br />
+                      <strong>{viewModalOffer.startDate} &mdash; {viewModalOffer.endDate}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase" }}>Recipient</span><br />
+                      <strong>{viewModalOffer.candidateEmail}</strong>
+                    </div>
+                  </div>
+
+                  <div className="admin-offer-paper-sign">
+                    <div>Warm regards,</div>
+                    <strong>HR & Talent Operations</strong><br />
+                    <span style={{ color: "#0d6efd", fontWeight: 600 }}>Trend Code Technology</span><br />
+                    <span>Ganapathy, Coimbatore — 641006 · +91 93848 47922</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal-footer">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => window.print()}
+              >
+                <i className="bi bi-printer me-1"></i> Print / Save PDF
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setViewModalOffer(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
   // Start locked; only a successful server check unlocks the dashboard.
   // (Trusting localStorage alone let anyone with devtools open /admin.)
@@ -389,6 +1484,11 @@ export default function Admin() {
   const [interns, setInterns] = useState(null);
   const [tours, setTours] = useState(null);
   const [deletingTour, setDeletingTour] = useState("");
+  const [galleryPhotos, setGalleryPhotos] = useState(null);
+  const [deletingPhotoId, setDeletingPhotoId] = useState("");
+  const [offers, setOffers] = useState(null);
+  const [deletingOfferId, setDeletingOfferId] = useState("");
+  const [offerPrefill, setOfferPrefill] = useState(null);
   const [error, setError] = useState("");
   const [dbWarn, setDbWarn] = useState("");
   const [checkErr, setCheckErr] = useState("");
@@ -407,6 +1507,8 @@ export default function Admin() {
     getSessions().then(setSessions).catch(fail(setSessions));
     getInternships().then(setInterns).catch(fail(setInterns));
     getTourEnquiries().then(setTours).catch(fail(setTours));
+    getGallery().then(setGalleryPhotos).catch(fail(setGalleryPhotos));
+    getOffers().then(setOffers).catch(fail(setOffers));
     // Warn (don't block) when the database is not actually connected — that is
     // why freshly submitted records can vanish from this page.
     getHealth()
@@ -458,6 +1560,52 @@ export default function Admin() {
       .then(() => setTours((prev) => (prev || []).filter((t) => t.id !== id)))
       .catch((e) => setError(e.message))
       .finally(() => setDeletingTour(""));
+  };
+
+  const handleAddPhoto = async (payload) => {
+    const res = await postGalleryPhoto(payload);
+    if (res && res.item) {
+      setGalleryPhotos((prev) => [res.item, ...(prev || [])]);
+    }
+    return res;
+  };
+
+  const handleDeletePhoto = (id) => {
+    if (window.confirm("Are you sure you want to delete this photo from the gallery?")) {
+      setDeletingPhotoId(id);
+      deleteGalleryPhoto(id)
+        .then(() => setGalleryPhotos((prev) => (prev || []).filter((p) => p.id !== id)))
+        .catch((e) => setError(e.message))
+        .finally(() => setDeletingPhotoId(""));
+    }
+  };
+
+  const handleSendOffer = async (payload) => {
+    const res = await postSendOffer(payload);
+    if (res && res.offer) {
+      setOffers((prev) => [res.offer, ...(prev || []).filter((o) => o.id !== res.offer.id)]);
+    }
+    return res;
+  };
+
+  const handleDeleteOffer = (id) => {
+    if (window.confirm("Are you sure you want to remove this offer letter from history?")) {
+      setDeletingOfferId(id);
+      deleteOffer(id)
+        .then(() => setOffers((prev) => (prev || []).filter((o) => o.id !== id)))
+        .catch((e) => setError(e.message))
+        .finally(() => setDeletingOfferId(""));
+    }
+  };
+
+  const handlePrepareOfferFromIntern = (intern) => {
+    setOfferPrefill({
+      candidateName: intern.name,
+      candidateEmail: intern.email,
+      role: intern.domain ? `${intern.domain} Intern` : "Software Developer Intern",
+      field: intern.domain || "Web Development & Coding",
+    });
+    setTab("offers");
   };
 
   const signOut = () => {
@@ -569,6 +1717,24 @@ export default function Admin() {
               </button>
               <button
                 role="tab"
+                aria-selected={tab === "gallery"}
+                className={`tech-tab ${tab === "gallery" ? "active" : ""}`}
+                onClick={() => setTab("gallery")}
+              >
+                <i className="bi bi-images me-1"></i> Photo Gallery
+                {galleryPhotos && <span className="admin-count">{galleryPhotos.length}</span>}
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === "offers"}
+                className={`tech-tab ${tab === "offers" ? "active" : ""}`}
+                onClick={() => setTab("offers")}
+              >
+                <i className="bi bi-file-earmark-check me-1"></i> Offer Sender
+                {offers && <span className="admin-count">{offers.length}</span>}
+              </button>
+              <button
+                role="tab"
                 aria-selected={tab === "authlog"}
                 className={`tech-tab ${tab === "authlog" ? "active" : ""}`}
                 onClick={() => setTab("authlog")}
@@ -620,7 +1786,7 @@ export default function Admin() {
                 <i className="bi bi-hourglass-split"></i> Loading…
               </div>
             ) : (
-              <InternshipsTable rows={interns} />
+              <InternshipsTable rows={interns} onPrepareOffer={handlePrepareOfferFromIntern} />
             )
           ) : tab === "tours" ? (
             tours === null ? (
@@ -632,6 +1798,34 @@ export default function Admin() {
                 rows={tours}
                 onDelete={removeTour}
                 busyId={deletingTour}
+              />
+            )
+          ) : tab === "gallery" ? (
+            galleryPhotos === null ? (
+              <div className="admin-empty">
+                <i className="bi bi-hourglass-split"></i> Loading…
+              </div>
+            ) : (
+              <AdminGalleryManager
+                photos={galleryPhotos}
+                onAddPhoto={handleAddPhoto}
+                onDeletePhoto={handleDeletePhoto}
+                deletingId={deletingPhotoId}
+              />
+            )
+          ) : tab === "offers" ? (
+            offers === null ? (
+              <div className="admin-empty">
+                <i className="bi bi-hourglass-split"></i> Loading…
+              </div>
+            ) : (
+              <AdminOfferSender
+                offers={offers}
+                onSendOffer={handleSendOffer}
+                onDeleteOffer={handleDeleteOffer}
+                deletingId={deletingOfferId}
+                prefill={offerPrefill}
+                onClearPrefill={() => setOfferPrefill(null)}
               />
             )
           ) : authlog === null ? (

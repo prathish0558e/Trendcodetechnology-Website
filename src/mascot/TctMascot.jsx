@@ -1,8 +1,9 @@
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  boot, closeChat, closeChatInstant, finishPanelClose, getUi, openChatInstant, projectToScreen,
-  setThinking, subscribe, wake, setProjectionPixel, state as mstate,
+  beginPickup, boot, closeChat, closeChatInstant, finishPanelClose, getUi, movePickup,
+  openChatInstant, projectToScreen, releasePickup, setThinking, subscribe, wake,
+  setProjectionPixel, state as mstate,
 } from "./store.js";
 import { handleRobotTap, probeWebGL } from "./support.js";
 import Robot2D from "./Robot2D.jsx";
@@ -19,9 +20,9 @@ import "./mascot.css";
 /*
  * TCT Assistant — the 3D mascot layer.
  *
- * A sleeping robot on a cloud lives in the bottom-left corner. Click it and
- * the full cinematic loop plays (wake → stretch → walk → hologram chat →
- * good night → walk back → sleep). The chat itself is a DOM glass panel so
+ * A sleeping robot on a cloud lives in the bottom-left corner. Tap it and
+ * the cinematic chat loop plays; drag it upward to pick it up and wake it.
+ * The chat itself is a DOM glass panel so
  * it stays readable, accessible and mobile-keyboard friendly while the robot
  * projects it from its mouth.
  *
@@ -85,6 +86,9 @@ export default function TctMascot() {
   const inputRef = useRef(null);
   const [hitPos, setHitPos] = useState(null);
   const [bubblePos, setBubblePos] = useState(null);
+  const pickupGestureRef = useRef(null);
+  const suppressPickupClickRef = useRef(false);
+  const suppressPickupClickTimerRef = useRef(null);
 
   // defer the WebGL work until the page has painted and settled
   useEffect(() => {
@@ -374,6 +378,92 @@ export default function TctMascot() {
     else closeChat();
   };
 
+  const onMascotPointerDown = (event) => {
+    if ((event.button !== undefined && event.button !== 0) || !["sleep", "pickupIdle"].includes(mstate.phase)) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const nx = rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
+    const ny = rect.height ? (event.clientY - rect.top) / rect.height : 0.5;
+    // Only start a pickup from the robot itself; cloud decoration keeps the
+    // existing tap-through behavior for page links underneath it.
+    if (!(nx > 0.24 && nx < 0.76 && ny > 0.1 && ny < 0.78)) return;
+    pickupGestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      lastAt: event.timeStamp || performance.now(),
+      velocityX: 0,
+      velocityY: 0,
+      started: false,
+    };
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* unsupported pointer capture */ }
+  };
+
+  const onMascotPointerMove = (event) => {
+    const gesture = pickupGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const liftPx = gesture.startY - event.clientY;
+    if (!gesture.started) {
+      // A deliberate upward drag picks the robot up; ordinary taps still open chat.
+      if (liftPx < 12) return;
+      if (!beginPickup()) {
+        pickupGestureRef.current = null;
+        return;
+      }
+      gesture.started = true;
+      suppressPickupClickRef.current = true;
+    }
+
+    const L = mstate.layout;
+    if (!L) return;
+    const now = event.timeStamp || performance.now();
+    const elapsed = Math.max(0.016, Math.min(0.12, (now - gesture.lastAt) / 1000));
+    const unitsPerPixelX = (2 * L.halfW) / L.w;
+    const unitsPerPixelY = (2 * L.halfH) / L.h;
+    const rawVelocityX = (event.clientX - gesture.lastX) * unitsPerPixelX / elapsed;
+    const rawVelocityY = (gesture.lastY - event.clientY) * unitsPerPixelY / elapsed;
+    gesture.velocityX = gesture.velocityX * 0.52 + rawVelocityX * 0.48;
+    gesture.velocityY = gesture.velocityY * 0.52 + rawVelocityY * 0.48;
+    gesture.lastX = event.clientX;
+    gesture.lastY = event.clientY;
+    gesture.lastAt = now;
+    const dx = event.clientX - gesture.startX;
+    movePickup({
+      height: Math.max(0, Math.min(1.25, liftPx * (2 * L.halfH / L.h))),
+      x: Math.max(-0.46, Math.min(0.46, dx * (2 * L.halfW / L.w) * 0.55)),
+      lookX: Math.max(-1, Math.min(1, dx / 90)),
+      lookY: Math.max(-1, Math.min(1, liftPx / 120)),
+    });
+  };
+
+  const finishMascotPointer = (event) => {
+    const gesture = pickupGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    pickupGestureRef.current = null;
+    if (!gesture.started) return;
+    const releasedAt = event.timeStamp || performance.now();
+    const momentum = Math.exp(-Math.max(0, releasedAt - gesture.lastAt) / 140);
+    releasePickup({
+      velocityX: gesture.velocityX * momentum,
+      velocityY: gesture.velocityY * momentum,
+    });
+    suppressPickupClickRef.current = true;
+    clearTimeout(suppressPickupClickTimerRef.current);
+    suppressPickupClickTimerRef.current = setTimeout(() => {
+      suppressPickupClickRef.current = false;
+    }, 350);
+  };
+
+  const onMascotActivate = (event) => {
+    if (suppressPickupClickRef.current) {
+      suppressPickupClickRef.current = false;
+      clearTimeout(suppressPickupClickTimerRef.current);
+      return;
+    }
+    handleRobotTap(event, wake);
+  };
+
   const resetConversation = () => {
     if (typing) return;
     setMessages([{ from: "bot", text: GREETING }]);
@@ -432,15 +522,19 @@ export default function TctMascot() {
         />
       )}
 
-      {/* the sleeping cloud — click / tap / keyboard to wake the robot */}
-      {mode === "3d" && ui.phase === "sleep" && hitPos && (
+      {/* Tap to open chat; drag upward on the robot to pick it up and wake it. */}
+      {mode === "3d" && ["sleep", "pickup", "pickupIdle", "throw", "throwLand"].includes(ui.phase) && hitPos && (
         <button
           type="button"
           className="tct3d-hit"
           style={{ left: hitPos.x, top: hitPos.y }}
-          onClick={(e) => handleRobotTap(e, wake)}
-          aria-label="Wake up the TCT Assistant"
-          title="Psst… wake the robot"
+          onPointerDown={onMascotPointerDown}
+          onPointerMove={onMascotPointerMove}
+          onPointerUp={finishMascotPointer}
+          onPointerCancel={finishMascotPointer}
+          onClick={onMascotActivate}
+          aria-label={ui.phase === "pickupIdle" ? "TCT Assistant is awake. Tap to chat or drag up to lift it." : "Tap to chat or drag TCT Assistant upward to wake it."}
+          title="Drag up to pick up and wake the robot · tap to chat"
         >
           <span className="tct3d-halo" aria-hidden="true" />
         </button>

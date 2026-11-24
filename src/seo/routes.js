@@ -57,6 +57,10 @@ export const SEO_ROUTES = {
     "Tour Packages from Coimbatore | India & International | TCT Tourism",
     "TCT Tourism offers India tour packages from Coimbatore — Ooty, Kodaikanal, Munnar, Alleppey, Wayanad — and international trips to Bali, Dubai, Singapore, Thailand, Maldives and Europe with clear per-person rates."
   ),
+  "/gallery": page(
+    "Photo Gallery | Trend Code Technology | Life, Team & Events",
+    "Explore photo highlights from Trend Code Technology — our workspace, team celebrations, training sessions, awards, and life at TCT in Coimbatore."
+  ),
   "/contact": page(
     "Contact TCT | Get a Technology Project Quote",
     "Contact Trend Code Technology in Coimbatore to discuss software, web, mobile app, digital marketing, HR or BPO requirements."

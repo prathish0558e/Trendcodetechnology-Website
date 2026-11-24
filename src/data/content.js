@@ -59,6 +59,7 @@ export const NAV = [
   },
   { label: "Internships", to: "/internship" },
   { label: "Tourism", to: "/tourism" },
+  { label: "Gallery", to: "/gallery" },
   { label: "Contact Us", to: "/contact" },
 ];
 

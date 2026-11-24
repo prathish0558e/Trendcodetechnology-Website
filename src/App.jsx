@@ -16,6 +16,7 @@ import CareerCategory from "./pages/CareerCategory.jsx";
 import Contact from "./pages/Contact.jsx";
 import Internship from "./pages/Internship.jsx";
 import Tourism from "./pages/Tourism.jsx";
+import Gallery from "./pages/Gallery.jsx";
 import SisterSite from "./pages/SisterSite.jsx";
 import Login from "./pages/Login.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -71,6 +72,11 @@ export default function App() {
             element={<SisterSite siteKey="fashionhub" />}
           />
           <Route path="/tct-trader" element={<SisterSite siteKey="trader" />} />
+          <Route
+            path="/tct-overseas-edu"
+            element={<SisterSite siteKey="overseas" />}
+          />
+          <Route path="/gallery" element={<Gallery />} />
           <Route path="/careers/:track" element={<CareerCategory />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/login" element={<Login />} />

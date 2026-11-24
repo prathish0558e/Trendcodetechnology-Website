@@ -62,9 +62,23 @@ const RULES = [
   },
   {
     id: "businesses",
-    k: ["business", "our group", "group of", "fashionhub", "fashion hub", "trader", "sister site", "other website", "other site", "tct group"],
+    k: [
+      "business",
+      "our group",
+      "group of",
+      "fashionhub",
+      "fashion hub",
+      "trader",
+      "overseas",
+      "education",
+      "study abroad",
+      "sister site",
+      "other website",
+      "other site",
+      "tct group",
+    ],
     a: () =>
-      `The TCT group runs ${SITES.length} businesses: ${businessLine()}. Trend Code Technology is this site; FashionHub and Trader are launching on their own domains soon — the cards on the home page link to them. 🚀`,
+      `The TCT group runs ${SITES.length} businesses: ${businessLine()}. Trend Code Technology is this site; TCT FashionHub, TCT Trader, and TCT Overseas & Education are our sister businesses — the showcase cards link directly to their pages. 🚀`,
   },
   {
     id: "services",

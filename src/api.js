@@ -45,14 +45,17 @@ async function request(path, options = {}) {
   const token = getToken();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = {
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  };
   let res;
   try {
     res = await fetch(apiUrl(path), {
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
       ...options,
+      headers,
       signal: options.signal || ctrl.signal,
     });
   } catch (err) {
@@ -127,3 +130,38 @@ export const postRevokeSession = (tokenPreview) =>
 
 export const postLogout = () =>
   request("/api/logout", { method: "POST", body: "{}" });
+
+export const getGallery = () => request("/api/gallery");
+
+export const postGalleryPhoto = (data) => {
+  if (typeof FormData !== "undefined" && data instanceof FormData) {
+    return request("/api/admin/gallery", {
+      method: "POST",
+      body: data,
+    });
+  }
+  return request("/api/admin/gallery", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteGalleryPhoto = (id) =>
+  request("/api/admin/gallery", {
+    method: "DELETE",
+    body: JSON.stringify({ id }),
+  });
+
+export const getOffers = () => request("/api/admin/offers");
+
+export const postSendOffer = (data) =>
+  request("/api/admin/offers/send", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const deleteOffer = (id) =>
+  request("/api/admin/offers", {
+    method: "DELETE",
+    body: JSON.stringify({ id }),
+  });

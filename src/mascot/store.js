@@ -6,6 +6,8 @@ import { gsap } from "gsap";
  * The full loop (fully repeatable):
  *   sleep → waking → stretch → transform → walk → arrive → chat
  *        → goodnight → dissolve → walkback → board → settle → sleep
+ * The companion gesture branch is:
+ *   sleep → pickup → pickupIdle → throw → throwLand → pickupIdle
  *
  * `state.t` is the 0→1 progress of the current phase. It is mutated every
  * frame by a gsap tween but is NOT emitted to React (no per-frame renders).
@@ -27,6 +29,11 @@ export const state = {
   eyeLeft: { x: 0, y: 0, z: 0 },
   eyeRight: { x: 0, y: 0, z: 0 },
   projectionPixel: null,
+  pickupHeight: 0,
+  pickupX: 0,
+  pickupLookX: 0,
+  pickupLookY: 0,
+  throwMotion: { x: 0, y: 0, vx: 0, vy: 0, spin: 0, angularVelocity: 0, landX: 0, impact: 0, impactSerial: 0, bounces: 0 },
   rig: { x: 0, y: 0.9, z: 8.6 }, // camera rig — tweened, read per frame by Scene
 };
 
@@ -182,6 +189,8 @@ export function setProjectionPixel(point) {
 const NEXT = {
   waking: "stretch",
   stretch: "transform",
+  pickup: "pickupIdle",
+  throwLand: "pickupIdle",
   transform: "walk",
   walk: "arrive",
   arrive: "project",
@@ -196,6 +205,8 @@ const NEXT = {
 const EASE = {
   waking: "power2.inOut",
   stretch: "power2.inOut",
+  pickup: "power2.out",
+  throwLand: "power2.out",
   transform: "power1.inOut",
   walk: "none",
   walkback: "none",
@@ -217,6 +228,8 @@ function duration(phase) {
     switch (phase) {
       case "waking": return 0.72;
       case "stretch": return 0.62;
+      case "pickup": return 0.42;
+      case "throwLand": return 0.72;
       case "transform": return 0.62;
       case "walk":
       case "walkback": {
@@ -236,6 +249,8 @@ function duration(phase) {
   switch (phase) {
     case "waking": return 1.3;
     case "stretch": return 1.0;
+    case "pickup": return 0.7;
+    case "throwLand": return 0.9;
     case "transform": return 1.1;
     case "walk":
     case "walkback": {
@@ -263,9 +278,21 @@ function killTweens() {
 }
 
 function goto(phase) {
+  const previousPhase = state.phase;
   killTweens();
   state.phase = phase;
   state.t = phase === "sleep" || phase === "chat" ? 1 : 0;
+  if (phase === "pickupIdle" && previousPhase === "throwLand") {
+    state.pickupHeight = 0;
+    state.pickupX = 0;
+    state.throwMotion.x = 0;
+    state.throwMotion.y = 0;
+    state.throwMotion.vx = 0;
+    state.throwMotion.vy = 0;
+    state.throwMotion.spin = 0;
+    state.throwMotion.angularVelocity = 0;
+    state.throwMotion.landX = 0;
+  }
   state.smile = phase === "goodnight";
   if (phase === "chat") {
     state.chatOpen = true;
@@ -299,7 +326,8 @@ function moveRig(phase) {
     ? { x: Math.min(L.stage.x * 0.12, L.home.x * 0.1), y: 0.98, z: L.mobile ? 8.0 : 7.75 }
     : { x: 0.2, y: 0.98, z: 7.75 };
   const targets = {
-    sleep: base, waking: base, stretch: base, board: base, settle: base,
+    sleep: base, waking: base, stretch: base, pickup: base, pickupIdle: base,
+    throw: base, throwLand: base, board: base, settle: base,
     transform: near, walk: near, walkback: near,
     arrive: near, project: near, chat: near, goodnight: near, dissolve: base,
   };
@@ -313,8 +341,99 @@ function moveRig(phase) {
 /* ------------------------- public actions ------------------------- */
 
 export function wake() {
-  if (state.phase !== "sleep") return;
-  goto("waking");
+  if (state.phase === "sleep") {
+    goto("waking");
+  } else if (state.phase === "pickupIdle") {
+    // Continue the already-awake mascot into the usual chat walk cycle.
+    goto("stretch");
+  }
+}
+
+export function beginPickup() {
+  if (state.phase !== "sleep" && state.phase !== "pickupIdle") return false;
+  state.pickupHeight = 0;
+  state.pickupX = 0;
+  state.pickupLookX = 0;
+  state.pickupLookY = 0;
+  Object.assign(state.throwMotion, { x: 0, y: 0, vx: 0, vy: 0, spin: 0, angularVelocity: 0, landX: 0, impact: 0, bounces: 0 });
+  goto("pickup");
+  return true;
+}
+
+export function movePickup({ height, x, lookX, lookY }) {
+  if (state.phase !== "pickup" && state.phase !== "pickupIdle") return;
+  state.pickupHeight = Math.max(0, Math.min(1.25, Number(height) || 0));
+  const edge = state.layout ? Math.max(0.1, Math.min(0.34, state.layout.cloudR * 0.5)) : 0.24;
+  state.pickupX = Math.max(-edge, Math.min(edge, Number(x) || 0));
+  state.pickupLookX = Math.max(-1, Math.min(1, Number(lookX) || 0));
+  state.pickupLookY = Math.max(-1, Math.min(1, Number(lookY) || 0));
+}
+
+export function releasePickup({ velocityX = 0, velocityY = 0 } = {}) {
+  if (state.phase !== "pickup" && state.phase !== "pickupIdle") return;
+  const motion = state.throwMotion;
+  motion.x = state.pickupX;
+  motion.y = state.pickupHeight;
+  motion.vx = Math.max(-1.5, Math.min(1.5, Number(velocityX) || 0));
+  motion.vy = Math.max(-1.6, Math.min(2.1, Number(velocityY) || 0));
+  motion.spin = 0;
+  motion.angularVelocity = Math.max(-2.2, Math.min(2.2, motion.vx * 1.2));
+  motion.landX = motion.x;
+  motion.impact = 0;
+  motion.bounces = 0;
+  goto("throw");
+}
+
+/* Integrate a short, bounded ballistic toss in the mascot scene. The cloud is
+   the landing surface; a soft damped bounce hands off to the seated idle pose. */
+export function advanceThrow(dt) {
+  if (state.phase !== "throw") return;
+  const motion = state.throwMotion;
+  const L = state.layout;
+  if (!L) return;
+  const step = Math.min(Math.max(Number(dt) || 0, 0), 0.05);
+  if (!step) return;
+
+  const gravity = state.reduced ? 5.2 : 4.6;
+  motion.vy -= gravity * step;
+  motion.y += motion.vy * step;
+  motion.x += motion.vx * step;
+  motion.vx *= Math.exp(-0.32 * step);
+  motion.angularVelocity *= Math.exp(-1.6 * step);
+  motion.spin = Math.max(-0.3, Math.min(0.3, motion.spin + motion.angularVelocity * step));
+
+  // Keep the small companion over the cloud, even after a vigorous flick.
+  const edge = Math.max(0.1, Math.min(0.34, L.cloudR * 0.5));
+  if (motion.x > edge || motion.x < -edge) {
+    motion.x = Math.max(-edge, Math.min(edge, motion.x));
+    motion.vx *= -0.22;
+  }
+  if (motion.y > 1.9) {
+    motion.y = 1.9;
+    motion.vy = Math.min(0, motion.vy) * -0.18;
+  }
+
+  if (motion.y <= 0 && motion.vy < 0) {
+    motion.y = 0;
+    motion.impact = Math.min(1, Math.abs(motion.vy) / 3.4);
+    motion.impactSerial += 1;
+    motion.bounces += 1;
+    motion.vy = -motion.vy * 0.22;
+    motion.vx *= 0.46;
+    motion.angularVelocity *= 0.28;
+    if (motion.bounces >= 2 || motion.vy < 0.48) {
+      motion.y = 0;
+      motion.vy = 0;
+      motion.landX = motion.x;
+      state.pickupHeight = 0;
+      state.pickupX = motion.x;
+      goto("throwLand");
+      return;
+    }
+  }
+
+  state.pickupHeight = motion.y;
+  state.pickupX = motion.x;
 }
 
 export function openChat() {

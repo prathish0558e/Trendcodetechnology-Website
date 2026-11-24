@@ -11,6 +11,7 @@ const QUICK_LINKS = [
   { label: "Careers", to: "/careers" },
   { label: "Internships", to: "/internship" },
   { label: "Tourism", to: "/tourism" },
+  { label: "Photo Gallery", to: "/gallery" },
   { label: "Contact Us", to: "/contact" },
 ];
 

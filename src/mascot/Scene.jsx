@@ -221,6 +221,7 @@ function VolumetricCloud() {
   const squash = useRef(1);
   const bounce = useRef({ t0: -10 });
   const lastPhase = useRef("sleep");
+  const lastThrowImpact = useRef(state.throwMotion.impactSerial);
 
   const R = state.layout ? state.layout.cloudR : 0.85;
 
@@ -310,6 +311,11 @@ function VolumetricCloud() {
     const clock = st.clock.elapsedTime;
     const g = group.current;
 
+    if (s.throwMotion.impactSerial !== lastThrowImpact.current) {
+      lastThrowImpact.current = s.throwMotion.impactSerial;
+      bounce.current.t0 = clock;
+    }
+
     // IMPORTANT: this bob must stay in exact sync with the robot's own bob
     // (same 0.55 rad/s, same 0.02 amp in Robot.jsx) so the robot always
     // rests ON the drifting cloud instead of sliding up and down its surface.
@@ -319,16 +325,24 @@ function VolumetricCloud() {
 
     // phase-entry bounce
     if (s.phase !== lastPhase.current) {
-      if (s.phase === "stretch" || s.phase === "board") bounce.current.t0 = clock;
+      if (["stretch", "pickup", "throwLand", "board"].includes(s.phase)) bounce.current.t0 = clock;
       lastPhase.current = s.phase;
     }
     const bt = clock - bounce.current.t0;
     // soft, quickly-decaying cushion pulse when the robot lands/launches
-    const amp = Math.exp(-Math.max(bt, 0) * 3.2) * 0.05 * (bt > 0 ? 1 : 0);
+    const bounceStrength = s.phase === "throwLand" ? 0.045 + 0.055 * s.throwMotion.impact : 0.05;
+    const amp = Math.exp(-Math.max(bt, 0) * 3.2) * bounceStrength * (bt > 0 ? 1 : 0);
 
     // weight: the cloud compresses softly while the robot rests on it
     let load = 0;
     if (["sleep", "waking", "stretch", "settle"].includes(s.phase)) load = 1;
+    else if (s.phase === "pickup" || s.phase === "pickupIdle") {
+      load = 1 - 0.62 * clamp(s.pickupHeight / 1.25, 0, 1);
+    } else if (s.phase === "throw") {
+      load = 1 - 0.7 * clamp(s.throwMotion.y / 1.65, 0, 1);
+    } else if (s.phase === "throwLand") {
+      load = 1;
+    }
     else if (s.phase === "board") load = easeInOut(s.t);
     squash.current = lerp(squash.current, load, 1 - Math.exp(-dt * 4));
     const sq = squash.current;

@@ -56,6 +56,8 @@ const FILES = {
   applications: path.join(DATA_DIR, "applications.json"),
   internships: path.join(DATA_DIR, "internships.json"),
   "tour-enquiries": path.join(DATA_DIR, "tour-enquiries.json"),
+  gallery: path.join(DATA_DIR, "gallery.json"),
+  offers: path.join(DATA_DIR, "offers.json"),
 };
 // A developer machine can hold the real connection string (server/.env) without
 // its own test submissions landing in the live database: locally the file store
@@ -82,6 +84,7 @@ const MEMORY = {
   applications: [],
   internships: [],
   "tour-enquiries": [],
+  gallery: [],
   authlog: [],
   sessions: [],
 };
@@ -107,6 +110,16 @@ const uploadResume = multer({
   fileFilter: (_req, file, cb) => {
     const ok = /\.(pdf|doc|docx)$/i.test(file.originalname);
     cb(ok ? null : new Error("Only PDF / DOC / DOCX files are allowed."), ok);
+  },
+});
+
+// Gallery image uploads — memory storage so photos work across both local dev & Vercel serverless
+const uploadGallery = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit for photos
+  fileFilter: (_req, file, cb) => {
+    const isImage = (file.mimetype && file.mimetype.startsWith("image/")) || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(file.originalname);
+    cb(isImage ? null : new Error("Only image files (JPG, PNG, WebP, GIF, SVG) are allowed."), Boolean(isImage));
   },
 });
 
@@ -263,43 +276,42 @@ const appendList = (file, item, max = 0) => listAppend(file, item, max);
 
 const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// ---------- email notifications (optional: set SMTP env vars) ----------
-const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || "trendcodetechnology2026@gmail.com";
+// ---------- email notifications (SMTP credentials with serverless fallback) ----------
+const DEFAULT_SMTP_HOST = "smtp.gmail.com";
+const DEFAULT_SMTP_PORT = 465;
+const DEFAULT_SMTP_USER = "trendcodetechnology2026@gmail.com";
+const DEFAULT_SMTP_PASS = "jzgeackrdzqvcbmx";
+
+const SMTP_HOST = process.env.SMTP_HOST || DEFAULT_SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT) || DEFAULT_SMTP_PORT;
+const SMTP_USER = process.env.SMTP_USER || DEFAULT_SMTP_USER;
+const SMTP_PASS = (process.env.SMTP_PASS || DEFAULT_SMTP_PASS).replace(/\s+/g, "");
+const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || SMTP_USER;
 
 function makeTransport() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
   return nodemailer.createTransport({
     host: SMTP_HOST,
-    port: Number(SMTP_PORT) || 587,
-    secure: Number(SMTP_PORT) === 465,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
-    // hard limits so a stalled SMTP server can never eat the whole
-    // serverless function time budget (Vercel would then kill the response)
-    connectionTimeout: 8000,
-    greetingTimeout: 8000,
-    socketTimeout: 20000,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 25000,
   });
 }
 
 const mailer = makeTransport();
 
-// Logged on every cold start — this is the first thing to check in the Vercel
-// function logs when mail "silently" does not arrive.
 console.log(
   mailer
-    ? `[mail] SMTP configured → host=${process.env.SMTP_HOST} user=${process.env.SMTP_USER}`
-    : "[mail] SMTP NOT configured — set SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS (Vercel: Project → Settings → Environment Variables)"
+    ? `[mail] SMTP configured → host=${SMTP_HOST} port=${SMTP_PORT} user=${SMTP_USER}`
+    : "[mail] SMTP NOT configured"
 );
 
 // Vercel stops all work the moment the response is sent, so notifications
 // (thank-you mail, owner alerts, WhatsApp) must be awaited BEFORE responding;
-// fire-and-forget would be cut off mid-SMTP-send. Locally we keep them
-// non-blocking so forms stay instant. Errors are logged, never swallowed.
-// On serverless the wait is bounded: after NOTIFY_WAIT_MS the response goes
-// out and the send keeps running in the background (SMTP normally finishes
-// in 1-2s, well inside the budget).
-const NOTIFY_WAIT_MS = 5000;
+// fire-and-forget would be cut off mid-SMTP-send.
+const NOTIFY_WAIT_MS = 9000;
 function boundedWait(promise, ms) {
   let timer;
   const timeout = new Promise((resolve) => {
@@ -308,41 +320,15 @@ function boundedWait(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-// Newer Vercel runtimes keep the function alive for promises handed to
-// waitUntil(), so the response can go out the instant the record is saved and
-// the mail still finishes sending (SMTP needs a few seconds). If the helper or
-// the request context is unavailable we fall back to the bounded await below.
-let _waitUntil;
-let _waitUntilLoaded = false;
-async function loadWaitUntil() {
-  if (_waitUntilLoaded) return _waitUntil;
-  _waitUntilLoaded = true;
-  if (!IS_SERVERLESS) return undefined;
-  try {
-    const mod = await import("@vercel/functions");
-    _waitUntil = typeof mod.waitUntil === "function" ? mod.waitUntil : undefined;
-  } catch {
-    _waitUntil = undefined;
-  }
-  return _waitUntil;
-}
-
 async function runNotifications(fns) {
   const all = Promise.all(
     fns.map((fn) =>
       fn().catch((err) => console.error("[notify] failed:", err?.message || err))
     )
   );
-  if (!IS_SERVERLESS) return undefined; // local: keep them non-blocking
-  const waitUntil = await loadWaitUntil();
-  if (waitUntil) {
-    try {
-      waitUntil(all);
-      return undefined; // response returns now, sends continue in background
-    } catch {
-      /* no request context — use the bounded wait instead */
-    }
-  }
+  // Always await notification delivery with a timeout:
+  // 1. On Vercel serverless, container freeze drops unawaited network sockets.
+  // 2. Bounded wait guarantees the client response is never stalled longer than NOTIFY_WAIT_MS.
   return boundedWait(all, NOTIFY_WAIT_MS);
 }
 
@@ -386,7 +372,7 @@ async function notifyNewLead(lead) {
   ].join("\n");
   try {
     await mailer.sendMail({
-      from: `"TCT Website" <${process.env.SMTP_USER}>`,
+      from: `"TCT Website" <${SMTP_USER}>`,
       to: NOTIFY_EMAIL,
       subject: `🔔 New enquiry — ${lead.name}${lead.service ? ` (${lead.service})` : ""}`,
       text,
@@ -607,7 +593,7 @@ ${bottomLine}
   ].join("\n");
   try {
     await mailer.sendMail({
-      from: `"Trend Code Technology" <${process.env.SMTP_USER}>`,
+      from: `"Trend Code Technology" <${SMTP_USER}>`,
       to,
       subject: k.subject,
       text,
@@ -620,6 +606,178 @@ ${bottomLine}
   } catch (err) {
     console.error(`[thankyou] failed for ${to} (${kind}):`, err.message);
   }
+}
+
+// ---------- offer sender (HR internship confirmation letter) ----------
+function formatOfferDate(d) {
+  if (!d) return "";
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return String(d);
+    return dt.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return String(d);
+  }
+}
+
+async function sendOfferLetterEmail({
+  candidateName,
+  candidateEmail,
+  salutation,
+  role,
+  field,
+  startDate,
+  endDate,
+  refId,
+}) {
+  if (!mailer) {
+    throw new Error("SMTP mailer is not configured.");
+  }
+
+  const attachments = [];
+  const hasLogo = attachMailAsset(attachments, "logo", "tctlogo");
+  const hasBanner = attachMailAsset(attachments, "email banner", "tctbanner");
+
+  const logoHtml = hasLogo
+    ? `<img src="cid:tctlogo" alt="Trend Code Technology" style="height: 48px; width: auto; margin-bottom: 12px; display: inline-block;" />`
+    : `<img src="${PUBLIC_SITE_URL}/tct-logo.png" alt="Trend Code Technology" style="height: 48px; width: auto; margin-bottom: 12px; display: inline-block;" />`;
+
+  const bannerHtml = hasBanner
+    ? `<div style="text-align: center; margin-bottom: 24px;"><img src="cid:tctbanner" alt="Trend Code Technology" style="max-width: 100%; height: auto; border-radius: 8px;" /></div>`
+    : "";
+
+  const text = [
+    `Dear ${salutation} ${candidateName},`,
+    "",
+    `We are pleased to confirm your position as a "${role}" at "TREND CODE TECHNOLOGY". Your internship began on ${startDate} to ${endDate} and is currently ongoing.`,
+    "",
+    `During this internship, you are expected to contribute to ${field} tasks, assist in coding and debugging activities, and support project requirements as assigned. This internship is designed to enhance your technical skills and provide valuable hands-on industry experience.`,
+    "",
+    "We appreciate your contribution so far and look forward to your continued dedication and learning.",
+    "",
+    "Reference ID: " + refId,
+    "Position: " + role,
+    "Domain / Field: " + field,
+    "Internship Period: " + startDate + " to " + endDate,
+    "",
+    "Warm regards,",
+    "HR & Talent Operations",
+    "Trend Code Technology",
+    "Ganapathy, Coimbatore — 641006",
+    "+91 93848 47922 · trendcodetechnology2026@gmail.com · https://tctechs.in",
+  ].join("\n");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Internship Offer Letter — Trend Code Technology</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;">
+    <!-- Header -->
+    <tr>
+      <td style="background: linear-gradient(135deg, #0d6efd 0%, #06b6d4 100%); padding: 36px 30px; text-align: center;">
+        ${logoHtml}
+        <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">TREND CODE TECHNOLOGY</h1>
+        <p style="margin: 6px 0 0; color: #e0f2fe; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px;">Official Internship Offer & Confirmation</p>
+      </td>
+    </tr>
+    <!-- Letter Meta bar -->
+    <tr>
+      <td style="background: #f8fafc; padding: 14px 30px; border-bottom: 1px solid #e2e8f0;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="font-size: 13px; color: #64748b; font-weight: 600;">
+              Ref: <span style="color: #0f172a; font-family: monospace;">${escapeHtml(refId)}</span>
+            </td>
+            <td align="right" style="font-size: 13px; color: #64748b; font-weight: 600;">
+              Date: <span style="color: #0f172a;">${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</span>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <!-- Body Content -->
+    <tr>
+      <td style="padding: 36px 32px 28px;">
+        ${bannerHtml}
+        <p style="font-size: 16px; color: #0f172a; margin: 0 0 20px; font-weight: 700;">
+          Dear ${escapeHtml(salutation)} ${escapeHtml(candidateName)},
+        </p>
+        <p style="font-size: 15px; line-height: 1.75; color: #334155; margin: 0 0 18px;">
+          We are pleased to confirm your position as a <strong>&ldquo;${escapeHtml(role)}&rdquo;</strong> at <strong>&ldquo;TREND CODE TECHNOLOGY&rdquo;</strong>. Your internship began on <strong>${escapeHtml(startDate)}</strong> to <strong>${escapeHtml(endDate)}</strong> and is currently ongoing.
+        </p>
+        <p style="font-size: 15px; line-height: 1.75; color: #334155; margin: 0 0 18px;">
+          During this internship, you are expected to contribute to <strong>${escapeHtml(field)}</strong> tasks, assist in coding and debugging activities, and support project requirements as assigned. This internship is designed to enhance your technical skills and provide valuable hands-on industry experience.
+        </p>
+        <p style="font-size: 15px; line-height: 1.75; color: #334155; margin: 0 0 26px;">
+          We appreciate your contribution so far and look forward to your continued dedication and learning.
+        </p>
+
+        <!-- Summary Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; margin-bottom: 28px;">
+          <tr>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+              <span style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px;">Designation / Role</span><br>
+              <strong style="font-size: 15px; color: #0f172a;">${escapeHtml(role)}</strong>
+            </td>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+              <span style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px;">Domain / Field</span><br>
+              <strong style="font-size: 15px; color: #0f172a;">${escapeHtml(field)}</strong>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 16px 20px;">
+              <span style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px;">Internship Period</span><br>
+              <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(startDate)} &mdash; ${escapeHtml(endDate)}</strong>
+            </td>
+            <td style="padding: 16px 20px;">
+              <span style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px;">Status</span><br>
+              <span style="display: inline-block; background: #ecfdf5; color: #059669; font-weight: 700; font-size: 12.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid #a7f3d0;">Active &middot; Ongoing</span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Sign-off Block -->
+        <div style="border-top: 1.5px solid #e2e8f0; padding-top: 22px; margin-top: 10px;">
+          <p style="margin: 0 0 6px; font-size: 14px; color: #64748b;">Warm regards,</p>
+          <p style="margin: 0; font-size: 16px; font-weight: 800; color: #0f172a;">HR & Talent Operations</p>
+          <p style="margin: 2px 0 0; font-size: 14px; font-weight: 700; color: #0d6efd;">Trend Code Technology</p>
+          <p style="margin: 6px 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
+            Ganapathy, Coimbatore &mdash; 641006, Tamil Nadu, India<br>
+            Phone: +91 93848 47922 &middot; Email: <a href="mailto:trendcodetechnology2026@gmail.com" style="color: #0d6efd; text-decoration: none;">trendcodetechnology2026@gmail.com</a>
+          </p>
+        </div>
+      </td>
+    </tr>
+    <!-- Footer -->
+    <tr>
+      <td style="background-color: #0f172a; padding: 20px 30px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6;">
+        &copy; 2026 Trend Code Technology. All Rights Reserved.<br>
+        This is an official computer-generated confirmation letter.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  await mailer.sendMail({
+    from: `"Trend Code Technology" <${SMTP_USER}>`,
+    to: candidateEmail,
+    bcc: NOTIFY_EMAIL,
+    subject: `Official Internship Offer & Confirmation — ${candidateName} | Trend Code Technology`,
+    text,
+    html,
+    attachments,
+  });
+
+  console.log(`[offer] sent offer letter to ${candidateEmail} for ${candidateName} (${role})`);
 }
 
 // ---------- routes ----------
@@ -704,7 +862,7 @@ async function notifyApplication(app_, resumeBuffer = null) {
     ].join("\n");
     try {
       await mailer.sendMail({
-        from: `"TCT Website" <${process.env.SMTP_USER}>`,
+        from: `"TCT Website" <${SMTP_USER}>`,
         to: NOTIFY_EMAIL,
         subject: `💼 New job application — ${app_.name} (${app_.position})`,
         text,
@@ -751,7 +909,7 @@ async function notifyTourEnquiry(en) {
     ].join("\n");
     try {
       await mailer.sendMail({
-        from: `"TCT Website" <${process.env.SMTP_USER}>`,
+        from: `"TCT Website" <${SMTP_USER}>`,
         to: NOTIFY_EMAIL,
         subject: `✈️ New tour enquiry — ${en.name} (${en.destination})`,
         text,
@@ -856,6 +1014,158 @@ app.delete("/api/admin/tour-enquiries", requireAdmin, async (req, res) => {
   }
   await writeList(FILES["tour-enquiries"], next);
   res.json({ ok: true, deleted: String(id), remaining: next.length });
+});
+
+// ---------- Photo Gallery Endpoints ----------
+const SEED_GALLERY = [
+  {
+    id: "gal-1",
+    title: "TCT Engineering Lab & Development Center",
+    category: "Office",
+    imageUrl: "/slide-2.jpg",
+    date: "2026-02-15",
+    description: "Our state-of-the-art software engineering floor in Ganapathy, Coimbatore.",
+    createdAt: "2026-02-15T10:00:00.000Z",
+  },
+  {
+    id: "gal-2",
+    title: "Client Collaboration & Tech Meetup",
+    category: "Events",
+    imageUrl: "/slide-1.jpg",
+    date: "2026-02-20",
+    description: "Brainstorming modern cloud architectures and product roadmaps with enterprise partners.",
+    createdAt: "2026-02-20T11:30:00.000Z",
+  },
+  {
+    id: "gal-3",
+    title: "Code Sprint & Hackathon",
+    category: "Workspace",
+    imageUrl: "/hero-poster.jpg",
+    date: "2026-03-01",
+    description: "Full-stack developer sprint solving real-world challenges with AI and modern web frameworks.",
+    createdAt: "2026-03-01T15:00:00.000Z",
+  },
+  {
+    id: "gal-4",
+    title: "TCT Leadership & Management Team",
+    category: "Team",
+    imageUrl: "/team/bharath.jpg",
+    date: "2026-03-05",
+    description: "Under the visionary leadership of Mr. Bharath T, Founder & CEO.",
+    createdAt: "2026-03-05T09:00:00.000Z",
+  },
+  {
+    id: "gal-5",
+    title: "Team Outing & Annual Retreat",
+    category: "Celebrations",
+    imageUrl: "/tourism/ooty.jpg",
+    date: "2026-03-10",
+    description: "Recharging minds amidst the Nilgiri hills during our annual team celebration.",
+    createdAt: "2026-03-10T14:00:00.000Z",
+  },
+  {
+    id: "gal-6",
+    title: "TCT Brand & Excellence Milestone",
+    category: "Achievements",
+    imageUrl: "/tct-shirt-logo.png",
+    date: "2026-03-12",
+    description: "Celebrating 1,150+ completed client deliveries and rapid expansion across sectors.",
+    createdAt: "2026-03-12T16:00:00.000Z",
+  },
+];
+
+// GET /api/gallery (public list)
+app.get("/api/gallery", async (_req, res) => {
+  try {
+    let list = await readList(FILES.gallery);
+    if (!list || list.length === 0) {
+      list = SEED_GALLERY;
+      await writeList(FILES.gallery, list);
+    }
+    const sorted = [...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    res.json(sorted);
+  } catch (err) {
+    console.error("[gallery] error reading list:", err);
+    res.json(SEED_GALLERY);
+  }
+});
+
+// POST /api/admin/gallery (admin upload / post)
+app.post(
+  "/api/admin/gallery",
+  requireAdmin,
+  (req, res, next) => {
+    uploadGallery.single("image")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ error: err.message || "Image upload failed." });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const { title, category, date, description } = req.body || {};
+      let imageUrl = req.body && req.body.imageUrl ? String(req.body.imageUrl).trim() : "";
+
+      if (req.file) {
+        const mime = req.file.mimetype || "image/jpeg";
+        const b64 = req.file.buffer.toString("base64");
+        imageUrl = `data:${mime};base64,${b64}`;
+      }
+
+      if (!title || !String(title).trim()) {
+        return res.status(400).json({ error: "Photo title is required." });
+      }
+      if (!imageUrl) {
+        return res.status(400).json({ error: "Please select an image file or provide an image URL." });
+      }
+
+      const newItem = {
+        id: "gal-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex"),
+        title: String(title).trim(),
+        category: category && String(category).trim() ? String(category).trim() : "General",
+        imageUrl,
+        date: date && String(date).trim() ? String(date).trim() : new Date().toISOString().slice(0, 10),
+        description: description ? String(description).trim() : "",
+        createdAt: new Date().toISOString(),
+      };
+
+      let list = await readList(FILES.gallery);
+      if (!list || list.length === 0) {
+        list = [...SEED_GALLERY];
+      }
+      list.unshift(newItem);
+      await writeList(FILES.gallery, list);
+
+      res.status(201).json({ ok: true, item: newItem });
+    } catch (err) {
+      console.error("[gallery] post error:", err);
+      res.status(500).json({ error: "Failed to post photo to gallery." });
+    }
+  }
+);
+
+// DELETE /api/admin/gallery/:id or DELETE /api/admin/gallery
+app.delete("/api/admin/gallery/:id?", requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id || (req.body && req.body.id);
+    if (!id) {
+      return res.status(400).json({ error: "Photo ID is required to delete." });
+    }
+    let list = await readList(FILES.gallery);
+    if (!list || list.length === 0) {
+      list = [...SEED_GALLERY];
+    }
+    const next = list.filter((item) => String(item.id) !== String(id));
+    if (next.length === list.length) {
+      return res.status(404).json({ error: "Photo not found in gallery." });
+    }
+    await writeList(FILES.gallery, next);
+    res.json({ ok: true, deleted: String(id), remaining: next.length });
+  } catch (err) {
+    console.error("[gallery] delete error:", err);
+    res.status(500).json({ error: "Failed to delete photo from gallery." });
+  }
 });
 
 app.post("/api/apply", uploadResume.single("resume"), async (req, res) => {
@@ -1394,7 +1704,7 @@ app.post(
         ].join("\n");
         try {
           await mailer.sendMail({
-            from: `"TCT Website" <${process.env.SMTP_USER}>`,
+            from: `"TCT Website" <${SMTP_USER}>`,
             to: NOTIFY_EMAIL,
             subject: `🎓 Internship application — ${app_.name} (${app_.domain})`,
             text,
@@ -1464,6 +1774,98 @@ app.get("/api/admin/leads", requireAdmin, async (_req, res) => {
 
 app.get("/api/admin/messages", requireAdmin, async (_req, res) => {
   res.json((await readList(FILES.messages)).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
+});
+
+// ---------- Admin: Offer Letters ----------
+app.get("/api/admin/offers", requireAdmin, async (_req, res) => {
+  const list = (await readList(FILES.offers)).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  res.json(list);
+});
+
+app.post("/api/admin/offers/send", requireAdmin, async (req, res) => {
+  const {
+    candidateName,
+    candidateEmail,
+    salutation = "Mr./Ms.",
+    role,
+    field,
+    startDate,
+    endDate,
+  } = req.body || {};
+
+  if (!candidateName || !String(candidateName).trim()) {
+    return res.status(400).json({ error: "Candidate name is required." });
+  }
+  if (!candidateEmail || !VALID_EMAIL.test(candidateEmail)) {
+    return res.status(400).json({ error: "A valid candidate email is required." });
+  }
+  if (!role || !String(role).trim()) {
+    return res.status(400).json({ error: "Internship role is required." });
+  }
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: "Start date and end date are required." });
+  }
+
+  const cleanName = String(candidateName).trim().slice(0, 100);
+  const cleanEmail = String(candidateEmail).trim().toLowerCase();
+  const cleanSalutation = String(salutation).trim() || "Mr./Ms.";
+  const cleanRole = String(role).trim().slice(0, 120);
+  const cleanField = String(field || cleanRole).trim().slice(0, 120);
+  const fStart = formatOfferDate(startDate);
+  const fEnd = formatOfferDate(endDate);
+
+  const refId = `TCT/INT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+
+  try {
+    await sendOfferLetterEmail({
+      candidateName: cleanName,
+      candidateEmail: cleanEmail,
+      salutation: cleanSalutation,
+      role: cleanRole,
+      field: cleanField,
+      startDate: fStart,
+      endDate: fEnd,
+      refId,
+    });
+  } catch (err) {
+    console.error("[offer] sendMail failed:", err.message);
+    return res.status(500).json({ error: `Failed to send email: ${err.message}` });
+  }
+
+  const record = {
+    id: Date.now().toString(),
+    refId,
+    candidateName: cleanName,
+    candidateEmail: cleanEmail,
+    salutation: cleanSalutation,
+    role: cleanRole,
+    field: cleanField,
+    startDate: fStart,
+    endDate: fEnd,
+    status: "Sent",
+    sentBy: req.adminSession?.user || "admin",
+    createdAt: new Date().toISOString(),
+  };
+
+  await appendList(FILES.offers, record);
+
+  res.status(201).json({
+    ok: true,
+    message: `Offer letter successfully sent to ${cleanEmail}!`,
+    offer: record,
+  });
+});
+
+app.delete("/api/admin/offers", requireAdmin, async (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ error: "Offer ID is required." });
+  const list = await readList(FILES.offers);
+  const next = list.filter((e) => e.id !== String(id));
+  if (next.length === list.length) {
+    return res.status(404).json({ error: "Offer record not found." });
+  }
+  await writeList(FILES.offers, next);
+  res.json({ ok: true, deleted: String(id), remaining: next.length });
 });
 
 // ---------- serve the built frontend in production ----------

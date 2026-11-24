@@ -16,6 +16,8 @@
     { "source": "/tourism", "destination": "/tourism.html" },
     { "source": "/tct-fashionhub", "destination": "/tct-fashionhub.html" },
     { "source": "/tct-trader", "destination": "/tct-trader.html" },
+    { "source": "/tct-overseas-edu", "destination": "/tct-overseas-edu.html" },
+    { "source": "/gallery", "destination": "/gallery.html" },
     { "source": "/contact", "destination": "/contact.html" },
     { "source": "/login", "destination": "/login.html" },
     { "source": "/admin", "destination": "/admin.html" },

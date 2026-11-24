@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinnedScene } from "three/addons/utils/SkeletonUtils.js";
-import { state } from "./store.js";
+import { advanceThrow, state } from "./store.js";
 import { glowTexture } from "./textures.js";
 import { findRobotClip, missingRobotNodes, ROBOT_GLB_URL } from "./robotAsset.js";
 
@@ -419,11 +419,13 @@ export default function Robot({ onStep }) {
   const blink = useRef({ next: 2.5, active: 0 });
   const stepIdx = useRef(0);
   const lastPh = useRef("sleep");
+  const lastThrowImpact = useRef(state.throwMotion.impactSerial);
   const tmpV = useMemo(() => new THREE.Vector3(), []);
   const eyeWorldL = useMemo(() => new THREE.Vector3(), []);
   const eyeWorldR = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((st, dtRaw) => {
+    advanceThrow(dtRaw);
     const s = state;
     const L = s.layout;
     if (!L || !root.current || !rigReady) return;
@@ -510,6 +512,57 @@ export default function Robot({ onStep }) {
       T.kneeLX = lerp(-0.28, -0.08, e); T.kneeRX = lerp(-0.5, -0.08, e);
       T.eyeOpen = 1; T.eyeGlow = 2.1; T.eyeHappy = 0.4;
       T.antenna = 0.8;
+    } else if (["pickup", "pickupIdle", "throw", "throwLand"].includes(s.phase)) {
+      Object.assign(T, SLEEP);
+      const alert = s.phase === "pickup" ? easeInOut(seg(t, 0.08, 0.72)) : 1;
+      const landing = s.phase === "throwLand" ? easeInOut(t) : 0;
+      const heldHeight = s.phase === "throw" ? s.throwMotion.y
+        : s.phase === "throwLand" ? 0
+          : s.pickupHeight;
+      const heldX = s.phase === "throw" ? s.throwMotion.x
+        : s.phase === "throwLand" ? lerp(s.throwMotion.landX, 0, landing)
+          : s.pickupX;
+      const lookX = clamp(s.pickupLookX, -1, 1);
+      const lookY = clamp(s.pickupLookY, -1, 1);
+
+      // Follow the visitor's lift gesture, then integrate a bounded gravity
+      // arc and soft cloud landing while the robot stays awake and curious.
+      px = L.home.x + heldX;
+      const landingBounce = s.phase === "throwLand"
+        ? Math.sin(Math.PI * t) * 0.12 * s.throwMotion.impact
+        : 0;
+      py = SLEEP_Y + bob + heldHeight + landingBounce;
+      pz = 0.18;
+      T.bodyZ = lerp(SLEEP.bodyZ, -0.66, alert) + (s.phase === "throw" ? s.throwMotion.spin : 0);
+      T.yaw = s.phase === "throw" ? s.throwMotion.spin * 0.42 : 0;
+      T.recline = lerp(SLEEP.recline, -0.18, alert);
+      T.headX = lerp(SLEEP.headX, clamp(-lookY * 0.14, -0.08, 0.16), alert);
+      T.headY = clamp(lookX * 0.34, -0.38, 0.38);
+      T.headZ = clamp(-lookX * 0.13 + lookY * 0.035, -0.16, 0.16);
+      T.eyeOpen = s.phase === "pickup" ? seg(t, 0.12, 0.56) : 1;
+      T.eyeHappy = 0.04;
+      T.eyeGlow = lerp(0.3, 1.65, alert);
+      T.mouth = lerp(0, 0.12, alert);
+      T.antenna = lerp(0.12, 0.72, alert) + Math.sin(clock * 5) * 0.035 * alert;
+      const flightReact = s.phase === "throw"
+        ? clamp(Math.abs(s.throwMotion.vy) * 0.13 + Math.abs(s.throwMotion.vx) * 0.2, 0, 0.7)
+        : s.phase === "throwLand" ? Math.sin(Math.PI * t) * s.throwMotion.impact : 0;
+      T.armLZ = lerp(SLEEP.armLZ, 0.18, alert) + flightReact * 0.18;
+      T.armRZ = lerp(SLEEP.armRZ, -0.18, alert) - flightReact * 0.18;
+      T.armLX = lerp(SLEEP.armLX, -0.06, alert);
+      T.armRX = lerp(SLEEP.armRX, -0.06, alert);
+      T.elbowLX = lerp(SLEEP.elbowLX, -0.12, alert);
+      T.elbowRX = lerp(SLEEP.elbowRX, -0.24, alert);
+      T.hipLX = lerp(SLEEP.hipLX, 0.18, alert);
+      T.hipRX = lerp(SLEEP.hipRX, 0.16, alert);
+      T.hipLZ = lerp(SLEEP.hipLZ, 0.12, alert);
+      T.hipRZ = lerp(SLEEP.hipRZ, -0.12, alert);
+      T.kneeLX = lerp(SLEEP.kneeLX, -0.24, alert);
+      T.kneeRX = lerp(SLEEP.kneeRX, -0.34, alert);
+      if (s.phase === "throw") {
+        T.headX += clamp(-s.throwMotion.vy * 0.025, -0.12, 0.12);
+        T.headZ += clamp(-s.throwMotion.vx * 0.08, -0.12, 0.12);
+      }
     } else if (s.phase === "transform") {
       // rises off the cloud, legs dangle, then settles to walk height
       const rise = easeInOut(seg(t, 0, 0.54));
@@ -816,6 +869,13 @@ export default function Robot({ onStep }) {
     if (contactFoot) {
       root.current.updateMatrixWorld(true);
       contactFoot.getWorldPosition(tmpV);
+      tmpV.y -= 0.04;
+      onStep && onStep(tmpV, false);
+    }
+    if (s.throwMotion.impactSerial !== lastThrowImpact.current) {
+      lastThrowImpact.current = s.throwMotion.impactSerial;
+      root.current.updateMatrixWorld(true);
+      (footL.current || root.current).getWorldPosition(tmpV);
       tmpV.y -= 0.04;
       onStep && onStep(tmpV, false);
     }

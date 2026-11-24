@@ -8,6 +8,7 @@ import CookieConsent from "../components/CookieConsent.jsx";
 import Journey from "../components/Journey.jsx";
 import TechStack from "../components/TechStack.jsx";
 import TeamCard, { TEAM } from "../components/TeamCard.jsx";
+import HomeGallery from "../components/HomeGallery.jsx";
 import {
   STATS,
   SERVICES,
@@ -500,6 +501,9 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ---------- Photo Gallery (Sliding Stream) ---------- */}
+      <HomeGallery />
 
       {/* ---------- Clients (animated logo marquee) ---------- */}
       <ClientsShowcase />
