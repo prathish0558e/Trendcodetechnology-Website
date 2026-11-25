@@ -64,8 +64,9 @@ const RULES = [
     id: "businesses",
     k: [
       "business",
+      "our paths",
+      "paths",
       "our group",
-      "group of",
       "fashionhub",
       "fashion hub",
       "trader",
@@ -78,7 +79,7 @@ const RULES = [
       "tct group",
     ],
     a: () =>
-      `The TCT group runs ${SITES.length} businesses: ${businessLine()}. Trend Code Technology is this site; TCT FashionHub, TCT Trader, and TCT Overseas & Education are our sister businesses — the showcase cards link directly to their pages. 🚀`,
+      `Our Paths spans ${SITES.length} businesses: ${businessLine()}. Trend Code Technology is this site; TCT FashionHub, TCT Trader, and TCT Overseas & Education are our sister businesses — the showcase cards link directly to their pages. 🚀`,
   },
   {
     id: "services",

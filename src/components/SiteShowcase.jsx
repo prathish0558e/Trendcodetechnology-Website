@@ -58,11 +58,22 @@ function SiteCard({ site }) {
 export default function SiteShowcase({ variant = "hero" }) {
   return (
     <div className={`site-showcase ${variant === "page" ? "ss-page" : "ss-hero"}`}>
-      {variant === "hero" ? (
-        <p className="ss-label">Our Group of Businesses</p>
-      ) : (
-        <h2 className="ss-label">Explore the TCT Group of Businesses</h2>
-      )}
+      <div className="ss-header">
+        <div className="ss-brand-logo">
+          <img
+            src="/tct-logo.png"
+            alt="Trend Code Technology"
+            width="128"
+            height="106"
+            loading="lazy"
+          />
+        </div>
+        {variant === "hero" ? (
+          <p className="ss-label">Our Paths</p>
+        ) : (
+          <h2 className="ss-label">Explore Our Paths</h2>
+        )}
+      </div>
       <div className="ss-grid ss-grid-4">
         {SITES.map((site) => (
           <SiteCard key={site.key} site={site} />

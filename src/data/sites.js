@@ -1,5 +1,5 @@
 /*
- * TCT group websites.
+ * Our Paths websites.
  *
  * These three drive the home hero showcase AND the two placeholder routes
  * (/tct-fashionhub, /tct-trader) so a sister site never lands on a 404.
@@ -30,7 +30,7 @@ export const SITES = [
     path: "/tct-fashionhub",
     url: null,
     status: "Store launching soon",
-    eyebrow: "TCT Group · Retail",
+    eyebrow: "Our Paths · Retail",
     headline: "Trending fashion, straight from Tamil Nadu's textile hubs",
     body: "TCT FashionHub is our fashion and apparel venture — everyday wear, festive collections and kids' ranges sourced from Coimbatore, Tiruppur and Erode mills, priced for regular shoppers instead of showroom markups. The online store is being built now; until it opens, our team takes orders and enquiries directly.",
     highlights: [
@@ -67,7 +67,7 @@ export const SITES = [
     path: "/tct-trader",
     url: null,
     status: "Platform launching soon",
-    eyebrow: "TCT Group · Trade",
+    eyebrow: "Our Paths · Trade",
     headline: "A simpler way to buy and sell wholesale",
     body: "TCT Trader is our trading and marketplace platform for wholesale buyers and sellers — verified partners, transparent daily price boards and secure settlements in one place. The platform is in development; right now our trade desk helps businesses buy, sell and price their goods directly.",
     highlights: [
@@ -104,7 +104,7 @@ export const SITES = [
     path: "/tct-overseas-edu",
     url: null,
     status: "Admissions open & portal launching soon",
-    eyebrow: "TCT Group · Global Education & Careers",
+    eyebrow: "Our Paths · Global Education & Careers",
     headline: "Your Gateway to Global Education, University Admissions & Visas",
     body: "TCT Overseas & Education guides students and ambitious professionals across Tamil Nadu to prestigious universities in the UK, USA, Canada, Australia, Germany, Ireland and more. From course selection and university shortlisting to IELTS/TOEFL coaching, financial documentation, and visa processing — our experienced counselors walk with you every step of the journey.",
     highlights: [
